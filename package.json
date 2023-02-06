@@ -1,8 +1,8 @@
 {
-  "name": "cf-template-apicache",
-  "version": "1.0.0",
-  "description": "An API caching gateway for HarperDB Custom Functions",
-  "author": "jaxon@harperdb.io",
-  "type": "module",
-  "dependencies": {}
+	"name": "cf-template-apicache",
+	"version": "2.0.0",
+	"description": "An API caching gateway for HarperDB Custom Functions",
+	"author": "kevin@harperdb.io",
+	"type": "module",
+	"dependencies": {}
 }

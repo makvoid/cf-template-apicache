@@ -5,16 +5,15 @@ cfr: cf_restart
 
 dev: down
 	docker run \
-		-v $(shell pwd):/opt/harperdb/hdb/custom_functions/$(cf) \
-		-e LOG_LEVEL=error \
+		-v $(shell pwd):/home/harperdb/hdb/custom_functions/$(cf) \
+		-e LOG_LEVEL=info \
 		-e HDB_ADMIN_USERNAME=hdbcf \
 		-e HDB_ADMIN_PASSWORD=hdbcf \
-		-e LOG_TO_STDSTREAMS=true \
-		-e RUN_IN_FOREGROUND=true \
-		-e CUSTOM_FUNCTIONS=true \
-		-e SERVER_PORT=9925 \
-		-e CUSTOM_FUNCTIONS_PORT=9926 \
-		-e MAX_CUSTOM_FUNCTION_PROCESSES=1 \
+		-e LOGGING_STDSTREAMS=true \
+		-e OPERATIONSAPI_FOREGROUND=true \
+		-e OPERATIONSAPI_PORT=9925 \
+		-e CUSTOMFUNCTIONS_ENABLED=true \
+		-e CUSTOMFUNCTIONS_PORT=9926 \
 		-p 9925:9925 \
 		-p 9926:9926 \
 		harperdb/harperdb:latest
