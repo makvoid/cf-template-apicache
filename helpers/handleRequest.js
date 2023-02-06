@@ -65,7 +65,6 @@ export const getResults = async ({ hdbCore, logger, method, url, headers, body, 
 	}
 
 	const maxAge = parseInt(headers['access-control-max-age'] || config.MAX_AGE_SECONDS) * 1000;
-	console.log('maxAge', maxAge);
 	const minTimestamp = Date.now() - maxAge;
 	const needsToUpdate =
 		!cachedRecord ||
