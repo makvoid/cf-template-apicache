@@ -1,94 +1,93 @@
-import { parse } from 'url';
+import config from './config.js';
+import { md5 } from './utils.js';
+import { getRecord, saveRecord, updatingRecord } from './cacheHelper.js';
+import { callAPI } from './callAPI.js';
 
-import md5 from '../helpers/md5.js';
-import makeCacheRequest from '../helpers/makeCacheRequest.js';
-import saveResultToCache from '../helpers/saveResultToCache.js';
-import setRecordToUpdating from '../helpers/setRecordToUpdating.js';
-import callAPI from '../helpers/callAPI.js';
+export const getResults = async ({ hdbCore, logger, method, url, headers, body, shouldCache = true }) => {
+	// 1. parse url into an md5 id
+	// 2. check for shouldSkipCache
+	//		a. call API
+	//		b. return results
+	// 3. check for existing record
+	//		a. return 304 if exists and updatedtime < headers[if-modified-since]
+	// 4. check if record is updating
+	//		a. wait for update to complete
+	// 5. check if record is out of date (consult headers[access-control-max-age])
+	//		a. set record to updating
+	//		b. call API for new data
+	//		c. save new record
+	//		d. get record
+	// 6. return the cached record
 
-const MAX_AGE_SECONDS = 60;
-const METHODS_TO_CACHE = ['GET'];
-
-const handleRequest = async ({
-	hdbCore,
-	request,
-	reply,
-	logger,
-	headers,
-	reqShouldCache,
-	max_age_seconds = MAX_AGE_SECONDS,
-}) => {
-	const url = parse(request.req.url.substr(request.req.url.indexOf('?')).replace('?', ''));
-	const method = request.method;
-	const start = Date.now();
-	const minCreatedDate = start - max_age_seconds * 1000;
-	let shouldCache;
-	if (reqShouldCache === undefined) shouldCache = METHODS_TO_CACHE.includes(method);
-	else shouldCache = reqShouldCache;
-	let cacheResult = false;
-	const hashAttribute = md5(`${method}${url.href}`);
-	const source = request.hostname;
-
-	if (shouldCache) {
-		cacheResult = await makeCacheRequest({
-			hdbCore,
-			hashAttribute,
-			minCreatedDate,
-		});
-	}
-
-	if (cacheResult?.length) {
-		reply.header('hdb-from-cache', true);
-
-		const { result, content_type, status } = cacheResult[0];
-
-		reply.header('content-type', content_type);
-
-		return { status_code: status, response_body: result };
-	} else {
-		reply.header('hdb-from-cache', false);
-
-		try {
-			let recordExists = false;
-			if (shouldCache) {
-				const result = await setRecordToUpdating({ hdbCore, hashAttribute });
-				recordExists = result.update_hashes.length > 0;
-			}
-
-			const response = await callAPI({ request, url, headers });
-			const { content_type } = response;
-			const result = response.body;
-			const status = response.statusCode;
-			const error = response.statusCode < 200 || response.statusCode > 299;
-			const duration_ms = Date.now() - start;
-
-			reply.header('content-type', content_type);
-
-			if (shouldCache) {
-				await saveResultToCache({
-					hdbCore,
-					hashAttribute,
-					result,
-					error,
-					status,
-					content_type,
-					source,
-					duration_ms,
-					recordExists,
-				});
-			}
-
-			return { status_code: response.statusCode, response_body: response.body };
-		} catch (error) {
-			const result = error.message;
-
-			reply.header('content-type', 'application/json; charset=utf-8');
-
-			await saveResultToCache({ hdbCore, hashAttribute, result, error: true });
-
-			return { status_code: 500, response_body: error.message };
+	// 1. CREATE ID from the method, url, and any headers (specified in the config)
+	let id = `${method}${url}`;
+	for (let header in config.HEADERS_TO_CACHE) {
+		if (header in headers) {
+			id += `:${header}=${headers[header]}`;
 		}
 	}
-};
+	id = md5(id); // because a string with a forward slash cannot be a record id
 
-export default handleRequest;
+	// 2. SKIP CACHE
+	if (!config.METHODS_TO_CACHE.includes(method)) {
+		shouldCache = false;
+	}
+
+	// if not caching, get and return the data
+	if (!shouldCache) {
+		const { body: replyBody, status, headers: apiHeaders } = await callAPI({ request, url, headers });
+		const replyHeaders = Object.assign({}, apiHeaders, { 'hdb-from-cache': false });
+		return { status, replyBody, replyHeaders };
+	}
+
+	// 3. GET RECORD
+	let cachedRecord = await getRecord({ hdbCore, id });
+	if (cachedRecord && headers['if-modified-since']) {
+		const ifModifiedSince = new Date(headers['if-modified-since']);
+		const updatedTime = new Date(cachedRecord.__updatedtime__);
+		if (updatedTime <= ifModifiedSince) {
+			return { status: 304, replyBody: null, replyHeaders: {} };
+		}
+	}
+
+	// 4. CHECK for existing record in an updating state
+	if (cachedRecord && cachedRecord.updating) {
+		// wait while record is updating
+		let bit = 0;
+		while (cachedRecord.updating) {
+			await new Promise((r) => setTimeout(r, 1 << bit));
+			cachedRecord = await getRecord({ hdbCore, id });
+			bit++;
+			if (bit > 10) {
+				throw new Error('Record update timeout');
+			}
+		}
+	}
+
+	const maxAge = parseInt(headers['access-control-max-age'] || config.MAX_AGE_SECONDS) * 1000;
+	const minTimestamp = Date.now() - maxAge;
+	const needsToUpdate =
+		!cachedRecord ||
+		cachedRecord.__updatedtime__ < minTimestamp ||
+		!cachedRecord.status ||
+		cachedRecord.status < 200 ||
+		cachedRecord.status > 299;
+
+	// 5. UPDATE RECORD (or create if doesn't already exist)
+	if (needsToUpdate) {
+		if (cachedRecord) {
+			await updatingRecord({ hdbCore, logger, id });
+		}
+		const { body: replyBody, status, headers: apiHeaders } = await callAPI({ method, url, headers, body });
+		await saveRecord({ hdbCore, logger, id, url, body: replyBody, status, headers: apiHeaders });
+		cachedRecord = await getRecord({ hdbCore, id });
+	}
+
+	// 6. RETURN cached record
+	const { body: replyBody, status, headers: apiHeaders } = cachedRecord;
+	const replyHeaders = Object.assign({}, apiHeaders, {
+		'hdb-from-cache': true,
+		'last-modified': new Date(cachedRecord.__updatedtime__).toUTCString(),
+	});
+	return { status, replyBody, replyHeaders };
+};

@@ -1,53 +1,40 @@
 import https from 'https';
 import http from 'http';
+import { parse } from 'url';
 
 const httpAgent = new http.Agent();
 const httpsAgent = new https.Agent({ rejectUnauthorized: false });
 
-const callAPI = ({ request, url }) => {
+export const callAPI = async ({ method, url, headers, body }) => {
+	url = parse(url);
 	return new Promise((resolve, reject) => {
 		const callback = (response) => {
-			let str = '';
+			let body = '';
 
 			response.on('data', (chunk) => {
-				str += chunk;
+				body += chunk;
 			});
-			response.on('end', () => {
-				const content_type =
-					response.headers && response.headers['content-type'] ? response.headers['content-type'] : 'text/plain';
 
-				try {
-					resolve({
-						body: str,
-						statusCode: response.statusCode,
-						content_type,
-					});
-				} catch (error) {
-					resolve({
-						body: str,
-						statusCode: response.statusCode,
-						content_type,
-					});
-				}
+			response.on('end', () => {
+				body = JSON.parse(body);
+				const { statusCode: status, headers } = response;
+				resolve({ body, status, headers });
 			});
 		};
 
-		const body = request.body ? JSON.stringify(request.body) : false;
 		const options = {
 			host: url.host,
 			port: url.protocol === 'https:' ? 443 : 80,
 			protocol: url.protocol,
 			path: url.path,
-			method: request.method,
+			method: method,
 			agent: url.protocol === 'https:' ? httpsAgent : httpAgent,
-			headers: request.headers,
+			headers: headers,
 		};
 		delete options.headers.host;
 
 		const req = (options.protocol === 'https:' ? https : http).request(options, callback);
-		req.on('error', (error) => {
-			reject(error);
-		});
+		req.on('error', reject);
 		if (body) {
 			req.write(body);
 		}
