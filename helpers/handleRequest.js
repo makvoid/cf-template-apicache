@@ -45,7 +45,7 @@ export const getResults = async ({ hdbCore, logger, method, url, headers, body, 
 	if (cachedRecord && headers['if-modified-since']) {
 		const ifModifiedSince = new Date(headers['if-modified-since']);
 		const updatedTime = new Date(cachedRecord.__updatedtime__);
-		if (updatedTime < ifModifiedSince) {
+		if (updatedTime <= ifModifiedSince) {
 			return { status: 304, replyBody: null, replyHeaders: {} };
 		}
 	}
