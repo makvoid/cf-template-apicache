@@ -3,7 +3,7 @@ cf=api-cache
 default: dev
 cfr: cf_restart
 
-dev: down
+dev: 
 	docker run \
 		-v $(shell pwd):/home/harperdb/hdb/custom_functions/$(cf) \
 		-e LOG_LEVEL=info \

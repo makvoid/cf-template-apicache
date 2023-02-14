@@ -4,5 +4,11 @@
 	"description": "An API caching gateway for HarperDB Custom Functions",
 	"author": "kevin@harperdb.io",
 	"type": "module",
-	"dependencies": {}
+	"scripts": {
+		"test": "mocha tests/*"
+	},
+	"dependencies": {
+		"chai": "^4.3.7",
+		"mocha": "^10.2.0"
+	}
 }
